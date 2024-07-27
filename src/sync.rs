@@ -34,17 +34,11 @@ fn handle_message(backend: Arc<Mutex<RoundRobinBackend>>,
     match channel {
         "backend_add" => {
             let mut backend = backend.lock().unwrap();
-            match backend.add(&payload) {
-                Ok(_) => info!("Added new server {}", payload),
-                _ => {}
-            }
+            if backend.add(&payload).is_ok() { info!("Added new server {}", payload) }
         }
         "backend_remove" => {
             let mut backend = backend.lock().unwrap();
-            match backend.remove(&payload) {
-                Ok(_) => info!("Removed server {}", payload),
-                _ => {}
-            }
+            if backend.remove(&payload).is_ok() { info!("Removed server {}", payload) }
         }
         _ => info!("Cannot parse Redis message"),
     }

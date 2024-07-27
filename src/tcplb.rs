@@ -42,15 +42,14 @@ impl Proxy {
 
     /// Create an instance of our proxy
     pub fn new(listen_addr: &str, backend: Arc<Mutex<RoundRobinBackend>>) -> Proxy {
-        let listen_addr: SocketAddr = FromStr::from_str(&listen_addr)
-                                          .ok()
-                                          .expect("Failed to parse listen host:port string");
+        let listen_addr: SocketAddr = FromStr::from_str(listen_addr)
+            .expect("Failed to parse listen host:port string");
         let listen_sock = TcpListener::bind(&listen_addr).unwrap();
         info!("Now listening on {}", &listen_addr);
         Proxy {
-            listen_sock: listen_sock,
+            listen_sock,
             token: Token(1),
-            backend: backend,
+            backend,
             connections: Slab::new_starting_at(Token(2), MAX_CONNECTIONS),
             readable_tokens: VecDeque::with_capacity(MAX_CONNECTIONS),
         }
@@ -300,23 +299,20 @@ impl Proxy {
             warn!("Attempting to terminate an already gone connection");
             return;
         }
-        match self.connections[token].end_token {
-            Some(end_token) => {
-                if self.connections[end_token].send_queue.is_empty() {
-                    // Nothing to write on the other end, we can drop it
-                    self.destroy_connection(event_loop, end_token);
-                } else {
-                    // We still need to write things in the other end
-                    // just stop reading it and we will terminate it
-                    // when we flushed its send_queue
-                    // Todo: Is there a way to schedule a timeout?
-                    self.connections[end_token].end_token = None;
-                    self.connections[end_token].interest.remove(EventSet::readable());
-                    self.connections[end_token].interest.insert(EventSet::writable());
-                    self.connections[end_token].reregister(event_loop).unwrap();
-                }
+        if let Some(end_token) = self.connections[token].end_token {
+            if self.connections[end_token].send_queue.is_empty() {
+                // Nothing to write on the other end, we can drop it
+                self.destroy_connection(event_loop, end_token);
+            } else {
+                // We still need to write things in the other end
+                // just stop reading it and we will terminate it
+                // when we flushed its send_queue
+                // Todo: Is there a way to schedule a timeout?
+                self.connections[end_token].end_token = None;
+                self.connections[end_token].interest.remove(EventSet::readable());
+                self.connections[end_token].interest.insert(EventSet::writable());
+                self.connections[end_token].reregister(event_loop).unwrap();
             }
-            None => {}
         }
         self.destroy_connection(event_loop, token);
     }
@@ -326,19 +322,16 @@ impl Proxy {
     /// While terminate_connection() handles corner cases, this method does not, it
     /// only cleans and drops.
     fn destroy_connection(&mut self, event_loop: &mut EventLoop<Proxy>, token: Token) {
-        match self.connections[token].timeout {
-            Some(timeout) => {
-                event_loop.clear_timeout(timeout);
-                self.connections[token].timeout = None;
-            }
-            None => {}
+        if let Some(timeout) = self.connections[token].timeout {
+            event_loop.clear_timeout(timeout);
+            self.connections[token].timeout = None;
         }
         self.connections[token].deregister(event_loop).unwrap();
         self.connections.remove(token);
     }
 
     /// Find a connection in the slab using the given token.
-    fn find_connection_by_token<'a>(&'a mut self, token: Token) -> &'a mut Connection {
+    fn find_connection_by_token(&mut self, token: Token) -> &mut Connection {
         &mut self.connections[token]
     }
 
@@ -346,12 +339,9 @@ impl Proxy {
     ///
     /// Resets the timeout to prevent multiple timeouts to be set concurrently.
     fn try_next_server(&mut self, event_loop: &mut EventLoop<Proxy>, token: Token) {
-        match self.connections[token].timeout {
-            Some(timeout) => {
-                event_loop.clear_timeout(timeout);
-                self.connections[token].timeout = None;
-            }
-            None => {}
+        if let Some(timeout) = self.connections[token].timeout {
+            event_loop.clear_timeout(timeout);
+            self.connections[token].timeout = None;
         }
         self.connections[token].deregister(event_loop).unwrap();
         self.connections[token].sock = match self.connect_to_backend_server() {
@@ -480,8 +470,8 @@ impl Drop for Connection {
 impl Connection {
     fn new(sock: TcpStream, token: Token, connected: bool) -> Connection {
         Connection {
-            sock: sock,
-            token: token,
+            sock,
+            token,
 
             // new connections are only listening for a hang up event when
             // they are first created. We always want to make sure we are
@@ -494,7 +484,7 @@ impl Connection {
             // When instanciated a Connection does not have yet an other end
             end_token: None,
 
-            connected: connected,
+            connected,
 
             timeout: None,
         }
@@ -604,7 +594,7 @@ impl Connection {
     /// events with the event loop.
     fn send_messages(&mut self, messages: Vec<ByteBuf>) -> io::Result<()> {
         // Todo: use Vec.append() but not in Rust stable
-        self.send_queue.extend(messages.into_iter());
+        self.send_queue.extend(messages);
         self.interest.insert(EventSet::writable());
         Ok(())
     }
@@ -618,9 +608,9 @@ impl Connection {
                                 self.token,
                                 self.interest,
                                 PollOpt::edge() | PollOpt::oneshot())
-                  .or_else(|e| {
+                  .map_err(|e| {
                       error!("Failed to register {:?}, {:?}", self.token, e);
-                      Err(e)
+                      e
                   })
     }
 
@@ -630,17 +620,17 @@ impl Connection {
                               self.token,
                               self.interest,
                               PollOpt::edge() | PollOpt::oneshot())
-                  .or_else(|e| {
+                  .map_err(|e| {
                       error!("Failed to reregister {:?}, {:?}", self.token, e);
-                      Err(e)
+                      e
                   })
     }
 
     /// De-register every interest in events for this connection
     fn deregister(&mut self, event_loop: &mut EventLoop<Proxy>) -> io::Result<()> {
-        event_loop.deregister(&self.sock).or_else(|e| {
+        event_loop.deregister(&self.sock).map_err(|e| {
             error!("Failed to deregister {:?}, {:?}", self.token, e);
-            Err(e)
+            e
         })
     }
 }
