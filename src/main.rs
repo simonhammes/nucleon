@@ -49,7 +49,7 @@ fn main() {
 
     env::set_var("RUST_LOG", log_level);
 
-    env_logger::init().unwrap();
+    env_logger::init();
 
     if servers.is_empty() {
         println!("Need at least one server to load balance");
@@ -62,7 +62,7 @@ fn main() {
     let mut event_loop = EventLoop::new().unwrap();
 
     // Register interest in notifications of new connections
-    event_loop.register_opt(&proxy.listen_sock,
+    event_loop.register(&proxy.listen_sock,
                             Token(1),
                             EventSet::readable(),
                             PollOpt::edge())

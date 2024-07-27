@@ -6,18 +6,19 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use mio::*;
-use mio::buf::ByteBuf;
+use bytes::Buf;
+use bytes::buf::ByteBuf;
 use mio::tcp::{TcpListener, TcpStream};
 use mio::util::Slab;
 
 use std::collections::VecDeque;
 use std::ops::Drop;
 
-use backend::{RoundRobinBackend, GetBackend};
+use crate::backend::{RoundRobinBackend, GetBackend};
 
 const BUFFER_SIZE: usize = 8192;
 const MAX_BUFFERS_PER_CONNECTION: usize = 16;
-const MAX_CONNECTIONS: usize = 512;
+const MAX_CONNECTIONS: usize = 1024;
 const CONNECT_TIMEOUT_MS: usize = 1000;
 
 pub struct Proxy {
@@ -79,8 +80,8 @@ impl Proxy {
         };
         let buffers_to_read = MAX_BUFFERS_PER_CONNECTION -
                               self.connections[other_end_token].send_queue.len();
-        let (exhausted_kernel, messages) = try!(self.find_connection_by_token(token)
-                                                    .read(buffers_to_read));
+        let (exhausted_kernel, messages) = self.find_connection_by_token(token)
+                                                    .read(buffers_to_read)?;
         // let's not tell we have something to write if we don't
         if messages.is_empty() {
             return Ok(exhausted_kernel);
@@ -198,10 +199,10 @@ impl Proxy {
                 return false;
             }
         };
-        match client_sock.peer_addr() {
+        /*match client_sock.1 {
             Ok(client_addr) => info!("New client connection from {}", client_addr),
             Err(_) => info!("New client connection from unknown source"),
-        }
+        }*/
         let backend_sock = match self.connect_to_backend_server() {
             Ok(backend_sock) => {
                 backend_sock
@@ -211,7 +212,7 @@ impl Proxy {
                 return false;
             }
         };
-        let client_token = self.create_connection_from_sock(client_sock, true, event_loop);
+        let client_token = self.create_connection_from_sock(client_sock.0, true, event_loop);
         let backend_token = self.create_connection_from_sock(backend_sock, false, event_loop);
         match client_token {
             Some(client_token) => {
@@ -549,7 +550,7 @@ impl Connection {
     /// Returns true when everything is flushed, false otherwise
     fn write(&mut self) -> io::Result<bool> {
         while !self.send_queue.is_empty() {
-            let wrote_everything = try!(self.write_one_buf());
+            let wrote_everything = self.write_one_buf()?;
             if !wrote_everything {
                 // Kernel did not accept all our data, let's keep
                 // interest on write events so we get notified when
@@ -613,7 +614,7 @@ impl Connection {
     /// This will let the event loop get notified on events happening on
     /// this connection.
     fn register(&mut self, event_loop: &mut EventLoop<Proxy>) -> io::Result<()> {
-        event_loop.register_opt(&self.sock,
+        event_loop.register(&self.sock,
                                 self.token,
                                 self.interest,
                                 PollOpt::edge() | PollOpt::oneshot())
