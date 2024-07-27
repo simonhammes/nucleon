@@ -9,7 +9,6 @@ use mio::*;
 use bytes::Buf;
 use bytes::buf::ByteBuf;
 use mio::tcp::{TcpListener, TcpStream};
-use mio::util::Slab;
 
 use std::collections::VecDeque;
 use std::ops::Drop;
@@ -20,6 +19,8 @@ const BUFFER_SIZE: usize = 8192;
 const MAX_BUFFERS_PER_CONNECTION: usize = 16;
 const MAX_CONNECTIONS: usize = 1024;
 const CONNECT_TIMEOUT_MS: usize = 1000;
+
+type Slab<T> = slab::Slab<T, mio::Token>;
 
 pub struct Proxy {
     // socket where incoming connections arrive

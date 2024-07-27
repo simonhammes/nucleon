@@ -275,6 +275,7 @@ dependencies = [
  "log 0.4.22",
  "mio",
  "redis",
+ "slab",
 ]
 
 [[package]]
